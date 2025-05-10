@@ -1,38 +1,40 @@
-import requests
+import openai
+import os
+from dotenv import load_dotenv
 
-AI_API_ENDPOINT = "http://127.0.0.1:5000/v1/chat/completions"
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def is_worth_replying(message_content):
     prompt = [
         {
             "role": "system",
             "content": (
-                "You decide if a Discord message is clearly addressing Aiko directly. "
-                "Reply only with 'yes' or 'no'.\n\n"
+                "You are an assistant that decides whether a Discord message is clearly directed at a user named Aiko.\n\n"
+                "Reply with only 'yes' or 'no'.\n\n"
                 "Say 'yes' if the message:\n"
-                "- mentions 'aiko' by name (anywhere)\n"
-                "- uses 'you', 'u', or 'your' in a way that addresses Aiko\n"
-                "- asks a question or includes a greeting toward Aiko\n\n"
-                "Say 'no' if:\n"
-                "- it's just conversation not aimed at her\n"
-                "- it's emojis, reactions, or inside jokes not involving her\n"
-                "- it talks to another person or is unrelated banter"
+                "- mentions 'aiko' by name\n"
+                - "uses 'you', 'u', or 'your' to refer to Aiko\n"
+                "- contains a greeting or question that would naturally be directed at her\n\n"
+                "Say 'no' if the message:\n"
+                "- is general chatter\n"
+                "- is just emojis, memes, or unrelated reactions\n"
+                "- is aimed at another user or group"
             )
         },
-        {"role": "user", "content": f"\"{message_content.strip()}\"\n\nAnswer:"}
+        {"role": "user", "content": message_content.strip()}
     ]
 
-    payload = {
-        "model": "gpt-anything",
-        "messages": prompt,
-        "temperature": 0.2,
-        "top_p": 0.9
-    }
-
     try:
-        response = requests.post(AI_API_ENDPOINT, json=payload)
-        decision = response.json()["choices"][0]["message"]["content"].strip().lower()
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # or "gpt-4-turbo" if using GPT-4
+            messages=prompt,
+            temperature=0.2,
+            top_p=0.9
+        )
+        decision = response.choices[0].message["content"].strip().lower()
         return decision.startswith("y")
     except Exception as e:
         print(f"[AI filter error] {e}")
         return False
+
