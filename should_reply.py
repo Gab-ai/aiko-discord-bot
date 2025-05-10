@@ -1,7 +1,8 @@
-import openai
+from openai import OpenAI
 import os
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def is_worth_replying(message_content):
     prompt = [
@@ -24,13 +25,13 @@ def is_worth_replying(message_content):
     ]
 
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=prompt,
+            messages=messages,
             temperature=0.2,
             top_p=0.9
         )
-        decision = response.choices[0].message["content"].strip().lower()
+        decision = response.choices[0].message.content.strip().lower()
         return decision.startswith("y")
     except Exception as e:
         print(f"[AI filter error] {e}")
