@@ -5,12 +5,14 @@ from asyncio import Lock
 from should_reply import is_worth_replying
 import time
 from datetime import datetime
-import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+response = client_ai.chat.completions.create(...)
+reply = response.choices[0].message.content.strip()
 
 user_daily_usage = {}  # user_id: {date: "2024-05-10", count: 3}
 MESSAGE_LIMIT = 5
@@ -30,7 +32,7 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True  # 🟢 Add this!
 client = discord.Client(intents=intents)
-
+user_daily_usage = {}
 
 # --- MEMORY & CHAT HISTORY ---
 chat_histories = {}
@@ -81,26 +83,23 @@ def get_full_context(chat_id):
 
 def summarize_chat_with_ai(chat_id):
     history = get_history(chat_id)[-12:]
-
-    prompt = [
+    messages = [
         {"role": "system", "content": (
-            "Summarize the conversation below into a short memory entry.\n"
-            "Focus on emotional tone, relationship progression, and meaningful shifts in mood or behavior. "
-            "Use a third-person narrative. Do not include user or assistant labels — just describe the key emotional beats."
+            "Summarize the conversation into a memory. Focus on emotional tone and connection. "
+            "Use third person. Don't include dialogue formatting."
         )}
     ] + history
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # or "gpt-4-turbo"
-            messages=prompt,
+        response = client_ai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
             temperature=0.5
         )
-        summary = response.choices[0].message["content"].strip()
+        summary = response.choices[0].message.content.strip()
         chat_memories[chat_id] = summary
         print(f"[Memory updated for {chat_id}]")
         return summary
-
     except Exception as e:
         print(f"[Memory error for {chat_id}]: {e}")
         return None
@@ -109,17 +108,15 @@ def summarize_chat_with_ai(chat_id):
 def query_ai(chat_id, message_content):
     history = get_history(chat_id)
     history.append({"role": "user", "content": message_content})
-
     context = get_full_context(chat_id)
 
-    response = openai.ChatCompletion.create(
+    response = client_ai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=context,
         temperature=0.7,
         top_p=0.95
     )
-
-    reply = response.choices[0].message["content"].strip()
+    reply = response.choices[0].message.content.strip()
     history.append({"role": "assistant", "content": reply})
     return reply
 
