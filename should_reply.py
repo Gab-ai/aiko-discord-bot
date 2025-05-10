@@ -27,7 +27,7 @@ def is_worth_replying(message_content):
     try:
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=messages,
+            messages=prompt,
             temperature=0.2,
             top_p=0.9
         )
