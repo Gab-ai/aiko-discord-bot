@@ -1,8 +1,6 @@
-import openai 
+import openai
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def is_worth_replying(message_content):
