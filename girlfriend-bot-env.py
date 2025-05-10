@@ -11,8 +11,6 @@ import os
 
 load_dotenv()
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-response = client_ai.chat.completions.create(...)
-reply = response.choices[0].message.content.strip()
 
 user_daily_usage = {}  # user_id: {date: "2024-05-10", count: 3}
 MESSAGE_LIMIT = 5
