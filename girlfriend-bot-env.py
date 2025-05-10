@@ -125,51 +125,22 @@ def query_ai(chat_id, message_content):
 
 # --- DISCORD EVENTS ---
 @client.event
-async def on_ready():
-    await client.change_presence(activity=discord.Game(name="vibin in chat 💅"))
-    print(f"🟢 Logged in as {client.user}")
-
-@client.event
 async def on_message(message):
     if message.author.bot or not message.content:
         return
 
-    # 🔧 Fetch full Member object if needed (for role check)
+    # 🔧 Fetch full Member object if needed
     if isinstance(message.author, discord.User):
         try:
             member = await message.guild.fetch_member(message.author.id)
         except:
-            return  # member not found, skip
+            return
     else:
         member = message.author
 
-    # ✅ Skip cooldown check for commands
-    msg_lower = message.content.strip().lower()
-    if msg_lower in ["!reset", "!join", "!leave"]:
-        pass
-    else:
-        # 🔐 Check for AI supporter role
-        has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
-
-        if not has_ai_role:
-            today = datetime.now().strftime("%Y-%m-%d")
-            uid = message.author.id
-
-            if uid not in user_daily_usage or user_daily_usage[uid]["date"] != today:
-                user_daily_usage[uid] = {"date": today, "count": 0}
-
-            if user_daily_usage[uid]["count"] >= MESSAGE_LIMIT:
-                await message.reply("🛑 you've hit your 5 free messages for today! become a supporter for unlimited chats 💖")
-                return
-
-            user_daily_usage[uid]["count"] += 1
-            print(f"[Usage] {message.author} used {user_daily_usage[uid]['count']} messages today")
-
-
-    chat_id = message.channel.id
-    history = get_history(chat_id)
     msg_lower = message.content.strip().lower()
 
+    # ✅ Handle commands
     if msg_lower == "!reset":
         chat_id = message.channel.id
         history = get_history(chat_id)
@@ -179,27 +150,59 @@ async def on_message(message):
         chat_memories.pop(chat_id, None)
         await message.channel.send("🧠 memory reset for this channel! let’s start fresh.")
         return
+
     if msg_lower == "!shutdown" and message.author.id == 576174683825766400:
         await message.reply("👋 shutting down~ see u soon...")
         await client.close()
         return
 
-    # Main logic
+    if msg_lower == "!usage-reset" and message.author.id == 576174683825766400:
+        user_daily_usage.clear()
+        await message.reply("✅ All daily usage counts have been reset.")
+        return
+
+    # 🧠 Check if message is worth replying to
+    should_reply = await asyncio.to_thread(is_worth_replying, message.content)
+    if not should_reply:
+        return
+
+    # 🔐 Usage tracking (ONLY if not AI verified and message is worth replying to)
+    has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
+    uid = message.author.id
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    if not has_ai_role and should_reply:
+        usage = user_daily_usage.get(uid)
+
+        if not usage or usage["date"] != today:
+            # New day or new user
+            user_daily_usage[uid] = {"date": today, "count": 0, "warned": False}
+            usage = user_daily_usage[uid]
+
+        if usage["count"] >= MESSAGE_LIMIT:
+            if not usage["warned"]:
+                await message.reply("🛑 you've hit your 5 free messages for today! become a supporter for unlimited chats 💖")
+                usage["warned"] = True
+            return  # block response
+
+        usage["count"] += 1
+        print(f"[Usage] {message.author} used {usage['count']} messages today")
+
+
+    # ✅ Generate and send reply
     async with response_lock:
         global last_reply_time
         now = time.time()
         if now - last_reply_time < REPLY_COOLDOWN:
-            return  # Skip if replying too soon
-        last_reply_time = now
-        if not await asyncio.to_thread(is_worth_replying, message.content):
             return
-        
+        last_reply_time = now
+
         await message.channel.typing()
         try:
+            chat_id = message.channel.id
             response = await asyncio.to_thread(query_ai, chat_id, message.content)
             await message.reply(response)
 
-            # Summarize after every 10 messages
             if len(get_history(chat_id)) % 10 == 0:
                 summarize_chat_with_ai(chat_id)
 
