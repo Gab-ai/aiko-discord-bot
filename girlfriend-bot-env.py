@@ -12,7 +12,6 @@ import os
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
-openai.api_key = openai_api_key
 
 user_daily_usage = {}  # user_id: {date: "2024-05-10", count: 3}
 MESSAGE_LIMIT = 5
@@ -24,9 +23,6 @@ REPLY_COOLDOWN = 2.5
 response_lock = Lock()
 
 # --- CONFIGURATION ---
-DISCORD_TOKEN = "MTM3MDc4MTIwNjUzNDQyMjU2OQ.GP-aqu.4NeDtT--0aWpgHjxy-nLEQdfFcDb17NXyke2f4"
-AI_API_ENDPOINT = "http://127.0.0.1:5000/v1/chat/completions"
-AUTHORIZED_USERS = {476436563748716546, 576174683825766400}
 
 # --- INTENTS ---
 intents = discord.Intents.default()
@@ -227,4 +223,4 @@ async def on_message(message):
             await message.channel.send(f"❌ Error: {e}")
 
 # --- START BOT ---
-client.run(DISCORD_TOKEN)
+client.run(os.getenv("DISCORD_TOKEN"))
