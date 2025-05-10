@@ -1,4 +1,4 @@
-import openai
+import openai 
 import os
 from dotenv import load_dotenv
 
@@ -14,7 +14,7 @@ def is_worth_replying(message_content):
                 "Reply with only 'yes' or 'no'.\n\n"
                 "Say 'yes' if the message:\n"
                 "- mentions 'aiko' by name\n"
-                - "uses 'you', 'u', or 'your' to refer to Aiko\n"
+                "- uses 'you', 'u', or 'your' to refer to Aiko\n"
                 "- contains a greeting or question that would naturally be directed at her\n\n"
                 "Say 'no' if the message:\n"
                 "- is general chatter\n"
@@ -27,7 +27,7 @@ def is_worth_replying(message_content):
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # or "gpt-4-turbo" if using GPT-4
+            model="gpt-3.5-turbo",
             messages=prompt,
             temperature=0.2,
             top_p=0.9
@@ -37,4 +37,3 @@ def is_worth_replying(message_content):
     except Exception as e:
         print(f"[AI filter error] {e}")
         return False
-
