@@ -1,7 +1,6 @@
 import discord
 import requests
 import asyncio
-from tts import text_to_speech, cleanup_audio_file
 from asyncio import Lock
 from should_reply import is_worth_replying
 import time
@@ -28,7 +27,10 @@ response_lock = Lock()
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
+intents.guilds = True
+intents.members = True  # 🟢 Add this!
 client = discord.Client(intents=intents)
+
 
 # --- MEMORY & CHAT HISTORY ---
 chat_histories = {}
@@ -79,27 +81,28 @@ def get_full_context(chat_id):
 
 def summarize_chat_with_ai(chat_id):
     history = get_history(chat_id)[-12:]
+
     prompt = [
         {"role": "system", "content": (
-            "Summarize the conversation below into a short memory entry. "
-            "Focus on emotional tone, rapport, and relationship development. Use third person."
+            "Summarize the conversation below into a short memory entry.\n"
+            "Focus on emotional tone, relationship progression, and meaningful shifts in mood or behavior. "
+            "Use a third-person narrative. Do not include user or assistant labels — just describe the key emotional beats."
         )}
     ] + history
 
-    payload = {
-        "model": "gpt-anything",
-        "messages": prompt,
-        "temperature": 0.5
-    }
-
     try:
-        response = requests.post(AI_API_ENDPOINT, json=payload)
-        summary = response.json()["choices"][0]["message"]["content"].strip()
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # or "gpt-4-turbo"
+            messages=prompt,
+            temperature=0.5
+        )
+        summary = response.choices[0].message["content"].strip()
         chat_memories[chat_id] = summary
         print(f"[Memory updated for {chat_id}]")
         return summary
+
     except Exception as e:
-        print(f"[Memory error for {chat_id}] {e}")
+        print(f"[Memory error for {chat_id}]: {e}")
         return None
 
 
@@ -123,26 +126,35 @@ def query_ai(chat_id, message_content):
 # --- DISCORD EVENTS ---
 @client.event
 async def on_ready():
+    await client.change_presence(activity=discord.Game(name="vibin in chat 💅"))
     print(f"🟢 Logged in as {client.user}")
 
 @client.event
 async def on_message(message):
-    # Skip bots and empty messages
     if message.author.bot or not message.content:
         return
 
+    # 🔧 Fetch full Member object if needed (for role check)
+    if isinstance(message.author, discord.User):
+        try:
+            member = await message.guild.fetch_member(message.author.id)
+        except:
+            return  # member not found, skip
+    else:
+        member = message.author
+
     # ✅ Skip cooldown check for commands
-    if message.content.strip().lower() in ["!reset", "!join", "!leave"]:
+    msg_lower = message.content.strip().lower()
+    if msg_lower in ["!reset", "!join", "!leave"]:
         pass
     else:
-        # Check if user is AI Verified
-        has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in message.author.roles)
+        # 🔐 Check for AI supporter role
+        has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
 
         if not has_ai_role:
             today = datetime.now().strftime("%Y-%m-%d")
             uid = message.author.id
 
-            # Initialize if user not in tracking
             if uid not in user_daily_usage or user_daily_usage[uid]["date"] != today:
                 user_daily_usage[uid] = {"date": today, "count": 0}
 
@@ -150,8 +162,8 @@ async def on_message(message):
                 await message.reply("🛑 you've hit your 5 free messages for today! become a supporter for unlimited chats 💖")
                 return
 
-            # Increment counter
             user_daily_usage[uid]["count"] += 1
+            print(f"[Usage] {message.author} used {user_daily_usage[uid]['count']} messages today")
 
 
     chat_id = message.channel.id
@@ -167,28 +179,9 @@ async def on_message(message):
         chat_memories.pop(chat_id, None)
         await message.channel.send("🧠 memory reset for this channel! let’s start fresh.")
         return
-
-
-    # !join VC
-    if msg_lower == "!join":
-        if message.author.voice and message.author.voice.channel:
-            channel = message.author.voice.channel
-            await channel.connect()
-            await message.channel.send("🎧 joined vc~ what r we doing, cutie?")
-        else:
-            await message.channel.send("you gotta be in a vc first, babe~ 😭")
-        return
-
-    # !leave VC
-    if msg_lower == "!leave":
-        vc = message.guild.voice_client
-        if vc and vc.is_connected():
-            if vc.is_playing():
-                vc.stop()
-            await vc.disconnect()
-            await message.channel.send("👋 left vc~ see u later, boo 💖")
-        else:
-            await message.channel.send("i'm not even in a vc rn lol 😅")
+    if msg_lower == "!shutdown" and message.author.id == 576174683825766400:
+        await message.reply("👋 shutting down~ see u soon...")
+        await client.close()
         return
 
     # Main logic
@@ -205,15 +198,6 @@ async def on_message(message):
         try:
             response = await asyncio.to_thread(query_ai, chat_id, message.content)
             await message.reply(response)
-
-            # Speak in VC
-            vc = message.guild.voice_client if message.guild else None
-            if vc and vc.is_connected():
-                filename = await text_to_speech(response)
-                vc.play(discord.FFmpegPCMAudio(executable="ffmpeg", source=filename))
-                while vc.is_playing():
-                    await asyncio.sleep(1)
-                cleanup_audio_file(filename)
 
             # Summarize after every 10 messages
             if len(get_history(chat_id)) % 10 == 0:
