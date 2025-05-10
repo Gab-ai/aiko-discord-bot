@@ -112,7 +112,7 @@ async def query_ai(chat_id, message_content):
     response = await openai_client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=context,
-        temperature=0.7,
+        temperature=1,
         top_p=0.95
     )
     reply = response.choices[0].message.content.strip()
@@ -154,7 +154,9 @@ async def on_message(message):
         await message.reply("✅ All daily usage counts have been reset.")
         return
 
-    should_reply = await asyncio.to_thread(is_worth_replying, message.content)
+    chat_id = message.channel.id
+    history = get_history(chat_id)[-4:]  # You can tweak depth
+    should_reply = await asyncio.to_thread(is_worth_replying, history)
     if not should_reply:
         return
 

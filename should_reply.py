@@ -1,35 +1,46 @@
-from openai import OpenAI
 import os
+from openai import OpenAI
 
+client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+def is_worth_replying(history):
+    """
+    history: List of dicts like [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey~"}]
+    Only the last 4 messages are needed.
+    """
 
-def is_worth_replying(message_content):
-    prompt = [
+    # Keep only the last 4 exchanges
+    context = history[-4:]
+
+    messages = [
         {
             "role": "system",
             "content": (
-                "You are an assistant that decides whether a Discord message is clearly directed at a user named Aiko.\n\n"
-                "Reply with only 'yes' or 'no'.\n\n"
-                "Say 'yes' if the message:\n"
-                "- mentions 'aiko' by name\n"
-                "- uses 'you', 'u', or 'your' to refer to Aiko\n"
-                "- contains a greeting or question that would naturally be directed at her\n\n"
-                "Say 'no' if the message:\n"
-                "- is general chatter\n"
-                "- is just emojis, memes, or unrelated reactions\n"
-                "- is aimed at another user or group"
+                "You are a filter that decides if a new Discord message is clearly addressing a user named Aiko in an ongoing conversation.\n\n"
+                "Only return 'yes' or 'no'.\n\n"
+                "Say 'yes' if the most recent message:\n"
+                "- mentions 'aiko'\n"
+                "- uses 'you', 'u', or 'your' referring to Aiko\n"
+                "- replies directly to something Aiko just said\n"
+                "- is playful or flirty in a back-and-forth way\n\n"
+                "Say 'no' if:\n"
+                "- it’s general banter not aimed at Aiko\n"
+                "- it talks to someone else\n"
+                "- there’s no clear continuation or reference to Aiko"
             )
         },
-        {"role": "user", "content": message_content.strip()}
+        *context,
+        {
+            "role": "user",
+            "content": "Should Aiko respond to that last message? Yes or no?"
+        }
     ]
 
     try:
-        response = client.chat.completions.create(
+        response = client_ai.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=prompt,
-            temperature=0.2,
-            top_p=0.9
+            messages=messages,
+            temperature=0.2
         )
         decision = response.choices[0].message.content.strip().lower()
         return decision.startswith("y")
