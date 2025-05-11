@@ -32,6 +32,7 @@ client = discord.Client(intents=intents)
 chat_histories = {}
 chat_memories = {}
 last_responded_message_id = {}  # channel_id: last_message_id
+last_user_to_aiko: dict[int, int] = {}  # channel_id -> user_id
 
 chat_histories, chat_memories = load_all()
 
@@ -41,25 +42,38 @@ def get_history(chat_id):
         chat_histories[chat_id] = [AIKO_SYSTEM_PROMPT]
     return chat_histories[chat_id]
 
-def get_full_context(chat_id):
+def get_full_context(chat_id: str, user_id: int):
     chat_id = str(chat_id)
     history = get_history(chat_id)
     context = []
 
-    # Add memory if it exists
+    # 🧠 Always start with the character system prompt
+    context.append(AIKO_SYSTEM_PROMPT)
+
+    # 🧠 Add memory if available
     if chat_id in chat_memories:
         context.append({
             "role": "system",
             "content": f"Memory: {chat_memories[chat_id]}"
         })
 
-    # Only include valid context messages (filter out bot-echoed ones)
-    for msg in history[-12:]:
-        if msg["role"] == "user" and msg.get("author_id") == client.user.id:
-            continue  # Skip Aiko's own messages
-        context.append({k: msg[k] for k in ("role", "content")})
+    # 🔎 Include only relevant recent messages, skipping Aiko's own (as user)
+    for entry in history[-12:]:
+        if entry["role"] == "user" and entry.get("author_id") == client.user.id:
+            continue  # Skip user-style echoes from Aiko
+        role = entry["role"]
+
+        # Add speaker name to clarify who said what
+        speaker = "Aiko" if entry.get("author_id") == client.user.id else f"User {entry.get('author_id', 'unknown')}"
+        content = f"{speaker}: {entry['content']}".strip()
+
+        context.append({
+            "role": role,
+            "content": content
+        })
 
     return context
+
 
 
 AIKO_SYSTEM_PROMPT = {
@@ -197,7 +211,7 @@ async def query_ai(chat_id, message_content, author_id):
         "author_id": author_id
     })
 
-    context = get_full_context(chat_id)
+    context = get_full_context(chat_id, author_id)
 
     try:
         response = await openai_client.chat.completions.create(
@@ -270,12 +284,25 @@ async def on_message(message):
         user_daily_usage.clear()
         await message.reply("✅ All daily usage counts have been reset.")
         return
-
-    # 🔍 Check if message is worth replying to
-    chat_id = message.channel.id
-    history = get_history(chat_id)[-4:]
-    should_reply = await is_worth_replying(history, AIKO_USER_ID)
-
+    # Fallback to True if directly replying to Aiko
+    if message.reference:
+        try:
+            replied_msg = await message.channel.fetch_message(message.reference.message_id)
+            if replied_msg.author.id == AIKO_USER_ID:
+                should_reply = True
+        except:
+            should_reply = False
+    else:
+        # Otherwise run AI-based filter
+        chat_id = message.channel.id
+        history = get_history(chat_id)[-6:]
+        should_reply = await is_worth_replying(
+            history=history,
+            current_user_id=message.author.id,
+            last_user_id=last_user_to_aiko.get(chat_id),
+            aiko_user_id=AIKO_USER_ID,
+            current_message=message.content
+        )
     if not should_reply:
         print(f"[Filter] Decided not to reply to: {history[-1]['content']}")
         last_responded_message_id[chat_id] = message.id  # 🧠 Still mark it to avoid rechecking
@@ -316,6 +343,7 @@ async def on_message(message):
             await message.reply(response)
 
             last_responded_message_id[chat_id] = message.id
+            last_user_to_aiko[chat_id] = message.author.id
 
             if len(get_history(chat_id)) % 10 == 0:
                 await summarize_chat_with_ai(chat_id)
