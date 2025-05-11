@@ -95,9 +95,10 @@ async def summarize_chat_with_ai(chat_id):
 
     try:
         response = await openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4-turbo",
             messages=messages,
-            temperature=0.5
+            temperature=0.85,
+            top_p=0.9
         )
         summary = response.choices[0].message.content.strip()
         chat_memories[chat_id] = summary
