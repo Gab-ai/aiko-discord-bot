@@ -1,7 +1,7 @@
-from openai import OpenAI
+from openai import AsyncOpenAI
 import os
 
-client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def is_worth_replying(channel_history: list[dict]) -> bool:
     recent = channel_history[-3:]  # last 3 exchanges (dicts with "role" + "content")
