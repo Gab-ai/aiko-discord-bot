@@ -28,6 +28,11 @@ client = discord.Client(intents=intents)
 
 chat_histories = {}
 chat_memories = {}
+last_responded_message_id = {}  # channel_id: last_message_id
+
+# Skip if we already handled this message ID in this channel
+if last_responded_message_id.get(message.channel.id) == message.id:
+    return
 
 chat_histories, chat_memories = load_all()
 
@@ -155,6 +160,10 @@ async def query_ai(chat_id, message_content):
 
 @client.event
 async def on_message(message):
+    
+    if last_responded_message_id.get(message.channel.id) == message.id:
+        return
+
     if message.author.bot or not message.content:
         return
 
@@ -228,6 +237,9 @@ async def on_message(message):
             response = await query_ai(chat_id, message.content)
             await message.reply(response)
 
+            #Store the last message ID responded to in this channel
+            last_responded_message_id[message.channel.id] = message.id
+            
             if len(get_history(chat_id)) % 10 == 0:
                 await summarize_chat_with_ai(chat_id)
 
