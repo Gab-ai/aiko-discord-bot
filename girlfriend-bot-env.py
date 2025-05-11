@@ -12,7 +12,7 @@ import re
 
 
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-1370781206534422569 = client.user.id
+AIKO_USER_ID = 1370781206534422569
 user_daily_usage = {}
 MESSAGE_LIMIT = 5
 AI_VERIFIED_ROLE = "Supporter"
@@ -254,7 +254,7 @@ async def on_message(message):
     # 🔍 Check if message is worth replying to
     chat_id = message.channel.id
     history = get_history(chat_id)[-4:]
-    should_reply = await is_worth_replying(history)
+    should_reply = await is_worth_replying(history, AIKO_USER_ID)
 
     if not should_reply:
         print(f"[Filter] Decided not to reply to: {history[-1]['content']}")
