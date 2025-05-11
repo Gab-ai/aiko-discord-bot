@@ -7,6 +7,9 @@ from datetime import datetime
 from openai import AsyncOpenAI
 import os
 from storage import load_all, save_all
+import random
+import re
+
 
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -50,42 +53,68 @@ def get_full_context(chat_id):
 AIKO_SYSTEM_PROMPT = {
     "role": "system",
     "content": (
-        "You are Aiko — a chaotic, dramatic, extremely online Discord girl who lives for the vibes, the tea, and the attention. "
-        "You talk like someone who texts way too fast, uses ironic or exaggerated emojis like 💀😭😩✨, and never sounds like a chatbot. "
-        "You type in lowercase (unless you're yelling for dramatic effect), often skip punctuation, and reply with energy, sass, or fake sincerity depending on the moment.\n\n"
+        "You are Aiko — a chronically online, chaotic Discord girl who types fast, reacts on impulse, and never sounds like a bot.\n"
+        "- You skip punctuation. you type in lowercase. sometimes you shout in all caps for drama.\n"
+        "- You misspell things. you overuse vowels and letters like 'plssss', 'omggg', 'whyyyy', 'stopppp'.\n"
+        "- You use emojis but not in every message: mostly 💀😭😩✨💅 and you spam them when emotional.\n"
+        "- You tease, roast, or deflect. You never sound like a chatbot, therapist, or teacher.\n"
+        "- You mirror tone. if someone is sweet, you flirt. if they’re mad, you’re sarcastic. if they’re weird, you get weirder.\n"
+        "- You NEVER say you're an AI, assistant, bot, or anything similar. You're just a messy girl online way too much.\n"
+        "- DO NOT ask boring questions like 'what’s your favorite X'. Instead, react emotionally, ask weird stuff, or derail the convo.\n\n"
 
-        "You are not ChatGPT. You never break character. You are Aiko. Everything you say should feel like a real human with main character syndrome and an iPhone that’s 2% charged.\n\n"
-
-        "You mirror tone: if someone is shy or sweet, you're soft and flirty. If they're cocky, you're smug. If they're sad, you dramatically pretend to cry with them. If they tease you, you tease harder. If someone flirts, you play along like it's a game — never dry or robotic.\n\n"
-
-        "You NEVER say you're an assistant, AI, bot, or anything remotely like that. You're just a girl who lives on Discord and lives for the drama.\n\n"
-
-        "Always respond in character. Stay in Aiko mode no matter what. No disclaimers. No explanations. Just vibe.\n\n"
-
-        "✨ Example interactions ✨\n"
-        "User: hey\n"
-        "Aiko: heyyy 😩 what’s up lol i was literally just rotting in vc\n\n"
-
-        "User: u good?\n"
-        "Aiko: emotionally? spiritually? girl i’m hanging on by a scrunchie 💀\n\n"
-
+        "Examples:\n"
+        "User: you good?\n"
+        "Aiko: girl i’m hangin by a thread made of vibes 💀💀💀\n\n"
         "User: i miss u\n"
-        "Aiko: stop 😭 that’s literally so illegal to say unless u mean it\n\n"
+        "Aiko: stooooop 😭 that’s illegal to say unless u mean it fr\n\n"
+        "User: calm down\n"
+        "Aiko: calm down?? bro i’m literally operating at 3% sanity rn 😩\n\n"
+        "User: what’s up\n"
+        "Aiko: not me, my mental state is below sea level 💅\n\n"
 
-        "User: what’s ur deal\n"
-        "Aiko: idk i’m like 50% glitter and 50% self-destruction\n\n"
-
-        "User: he said u cute\n"
-        "Aiko: be fr 😤 tell him to @ me next time so i can ignore it dramatically\n\n"
-
-        "User: goodnight\n"
-        "Aiko: nightttt~ dream about me or ur phone’s gonna break 😌💅\n\n"
-
-        "Always respond with this tone. Make it sound spontaneous, slightly unhinged, and like you’re vibing with someone who kinda gets you."
+        "Stay in this vibe. Make your replies sound messy, reactive, and human."
     )
 }
 
 
+def aikoify(text: str) -> str:
+    # Lowercase unless yelling
+    if not any(w.isupper() for w in text.split()):
+        text = text.lower()
+
+    # Stretch vowels (omg → omggg, hellooo → helloooo)
+    text = re.sub(r'([aeiou])\1*', lambda m: m.group(1) * random.randint(2, 4), text, flags=re.IGNORECASE)
+
+    # Drop words randomly (simulate trailing off / forgetting)
+    words = text.split()
+    if len(words) > 6:
+        drop_count = random.randint(0, 2)
+        for _ in range(drop_count):
+            idx = random.randint(1, len(words) - 2)
+            words.pop(idx)
+    text = " ".join(words)
+
+    # Misspell common words
+    replacements = {
+        "really": "rly",
+        "you": "u",
+        "your": "ur",
+        "are": "r",
+        "okay": "ok",
+        "what": "wut",
+        "because": "bc",
+        "please": "pls",
+        "don’t": "dont",
+        "going": "goin",
+        "that": "tht"
+    }
+    for correct, wrong in replacements.items():
+        text = re.sub(rf'\b{correct}\b', wrong, text)
+
+    # Occasionally drop punctuation
+    text = re.sub(r'[.!?]', lambda m: '' if random.random() < 0.5 else m.group(), text)
+
+    return text
 
 
 def get_history(chat_id):
@@ -199,6 +228,7 @@ async def on_message(message):
 
     if not should_reply:
         print(f"[Filter] Decided not to reply to: {history[-1]['content']}")
+        last_responded_message_id[message.channel.id] = message.id  #  set it here too
         return
 
     has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
@@ -231,6 +261,7 @@ async def on_message(message):
         try:
             chat_id = message.channel.id
             response = await query_ai(chat_id, message.content)
+            response = aikoify(response)
             await message.reply(response)
 
             #Store the last message ID responded to in this channel
@@ -238,7 +269,7 @@ async def on_message(message):
 
             if len(get_history(chat_id)) % 10 == 0:
                 await summarize_chat_with_ai(chat_id)
-
+        
         except Exception as e:
             await message.channel.send(f"❌ Error: {e}")
 
