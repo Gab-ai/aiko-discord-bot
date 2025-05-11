@@ -307,6 +307,9 @@ async def on_message(message):
             should_reply = False
 
     # 🔓 Check supporter role and usage limits
+    has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
+    uid = message.author.id
+    today = datetime.now().strftime("%Y-%m-%d")
     if not has_ai_role:
         usage = user_daily_usage.get(uid)
         if not usage or usage["date"] != today:
