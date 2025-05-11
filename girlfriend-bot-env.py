@@ -138,11 +138,26 @@ def get_history(chat_id):
     return chat_histories[chat_id]
 
 def get_full_context(chat_id):
+    chat_id = str(chat_id)
     history = get_history(chat_id)
     context = []
+
+    # 🧠 Re-insert system prompt every time for consistent character
+    context.append(AIKO_SYSTEM_PROMPT)
+
+    # ✨ Include memory summary if available
     if chat_id in chat_memories:
-        context.append({"role": "system", "content": f"Memory: {chat_memories[chat_id]}"})
-    context += history[-12:]
+        context.append({
+            "role": "system",
+            "content": f"Memory: {chat_memories[chat_id]}"
+        })
+
+    # 📜 Append last 12 messages, skipping bot echoes
+    for msg in history[-12:]:
+        if msg["role"] == "user" and msg.get("author_id") == client.user.id:
+            continue  # Don't let Aiko's own messages show as user inputs
+        context.append({k: msg[k] for k in ("role", "content") if k in msg})
+
     return context
 
 async def summarize_chat_with_ai(chat_id):
@@ -175,8 +190,13 @@ async def query_ai(chat_id, message_content, author_id):
     chat_id = str(chat_id)
     history = get_history(chat_id)
 
-    # Add user message with author ID
-    history.append({"role": "user", "content": message_content, "author_id": author_id})
+    # Add new user message
+    history.append({
+        "role": "user",
+        "content": message_content,
+        "author_id": author_id
+    })
+
     context = get_full_context(chat_id)
 
     try:
@@ -192,11 +212,11 @@ async def query_ai(chat_id, message_content, author_id):
 
         reply = response.choices[0].message.content.strip()
 
-        # Add assistant message with explicit author ID (bot’s own ID)
+        # Add assistant's response with author_id
         history.append({
             "role": "assistant",
             "content": reply,
-            "author_id": client.user.id  # You should assign this at on_ready
+            "author_id": client.user.id  # ✅ Must be defined in on_ready
         })
 
         chat_histories[chat_id] = history
