@@ -189,7 +189,7 @@ async def on_message(message):
     if last_responded_message_id.get(message.channel.id) == message.id:
         return
 
-    if message.author.bot or not message.content:
+    if message.author.id == client.user.id or not message.content:
         return
 
     if isinstance(message.author, discord.User):
