@@ -5,10 +5,15 @@ HISTORY_FILE = "chat_histories.json"
 MEMORY_FILE = "chat_memories.json"
 
 def load_json(path):
-    if not os.path.exists(path):
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
         return {}
+
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            print(f"[Warning] Failed to parse {path}, using empty fallback.")
+            return {}
 
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
