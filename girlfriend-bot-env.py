@@ -42,37 +42,28 @@ def get_history(chat_id):
         chat_histories[chat_id] = [AIKO_SYSTEM_PROMPT]
     return chat_histories[chat_id]
 
-def get_full_context(chat_id: str, user_id: int):
-    chat_id = str(chat_id)
+def get_full_context(chat_id: str) -> list[dict]:
     history = get_history(chat_id)
-    context = []
+    context = [AIKO_SYSTEM_PROMPT]
 
-    # 🧠 Always start with the character system prompt
-    context.append(AIKO_SYSTEM_PROMPT)
-
-    # 🧠 Add memory if available
+    # Include memory if available
     if chat_id in chat_memories:
         context.append({
             "role": "system",
             "content": f"Memory: {chat_memories[chat_id]}"
         })
 
-    # 🔎 Include only relevant recent messages, skipping Aiko's own (as user)
-    for entry in history[-12:]:
-        if entry["role"] == "user" and entry.get("author_id") == client.user.id:
-            continue  # Skip user-style echoes from Aiko
-        role = entry["role"]
-
-        # Add speaker name to clarify who said what
-        speaker = "Aiko" if entry.get("author_id") == client.user.id else f"User {entry.get('author_id', 'unknown')}"
-        content = f"{speaker}: {entry['content']}".strip()
-
+    # Append up to 12 recent messages, skip Aiko's user inputs
+    for msg in history[-12:]:
+        if msg.get("author_id") == AIKO_USER_ID and msg["role"] == "user":
+            continue
         context.append({
-            "role": role,
-            "content": content
+            "role": msg["role"],
+            "content": msg["content"]
         })
 
     return context
+
 
 
 
@@ -204,14 +195,14 @@ async def query_ai(chat_id, message_content, author_id):
     chat_id = str(chat_id)
     history = get_history(chat_id)
 
-    # Add new user message
+    # Add user input to history
     history.append({
         "role": "user",
         "content": message_content,
         "author_id": author_id
     })
 
-    context = get_full_context(chat_id, author_id)
+    context = get_full_context(chat_id)
 
     try:
         response = await openai_client.chat.completions.create(
@@ -226,11 +217,11 @@ async def query_ai(chat_id, message_content, author_id):
 
         reply = response.choices[0].message.content.strip()
 
-        # Add assistant's response with author_id
+        # Add Aiko's response to history
         history.append({
             "role": "assistant",
             "content": reply,
-            "author_id": client.user.id  # ✅ Must be defined in on_ready
+            "author_id": AIKO_USER_ID
         })
 
         chat_histories[chat_id] = history
@@ -240,6 +231,7 @@ async def query_ai(chat_id, message_content, author_id):
     except Exception as e:
         print(f"[query_ai error] {e}")
         return "omg something broke i’m blaming mercury retrograde 💀"
+
 
 
 
@@ -315,24 +307,23 @@ async def on_message(message):
             should_reply = False
 
     # 🔓 Check supporter role and usage limits
-    has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
-    uid = message.author.id
-    today = datetime.now().strftime("%Y-%m-%d")
-
     if not has_ai_role:
         usage = user_daily_usage.get(uid)
         if not usage or usage["date"] != today:
-            user_daily_usage[uid] = {"date": today, "count": 0, "warned": False}
-            usage = user_daily_usage[uid]
+            usage = {"date": today, "count": 0, "warned": False}
+            user_daily_usage[uid] = usage
 
         if usage["count"] >= MESSAGE_LIMIT:
             if not usage["warned"]:
-                await message.reply("🛑 you've hit your 5 free messages for today! become a supporter for unlimited chats 💖")
                 usage["warned"] = True
+                try:
+                    await message.author.send("🛑 you’ve hit your 5 free messages for today! become a supporter for unlimited chats 💖")
+                except discord.Forbidden:
+                    print(f"[DM FAIL] Couldn't DM user {message.author}")
             return
 
-        usage["count"] += 1
-        print(f"[Usage] {message.author} used {usage['count']} messages today")
+    usage["count"] += 1
+    print(f"[Usage] {message.author} used {usage['count']} messages today")
 
     # 💬 Generate and send reply
     async with response_lock:

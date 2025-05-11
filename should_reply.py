@@ -1,3 +1,9 @@
+from openai import AsyncOpenAI
+import os
+
+client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+AIKO_USER_ID = 1370781206534422569
+
 async def is_worth_replying(
     history: list[dict],
     current_user_id: int,
@@ -5,6 +11,7 @@ async def is_worth_replying(
     aiko_user_id: int,
     current_message: str
 ) -> bool:
+    # Only keep messages not by Aiko
     recent = [msg for msg in history if msg.get("author_id") != aiko_user_id][-3:]
     transcript = "\n".join(f"{msg['role']}: {msg['content']}" for msg in recent)
 
@@ -44,4 +51,3 @@ async def is_worth_replying(
     except Exception as e:
         print(f"[AI filter error] {e}")
         return False
-
