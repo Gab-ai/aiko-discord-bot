@@ -77,44 +77,47 @@ AIKO_SYSTEM_PROMPT = {
 }
 
 
+COMMON_MISTYPES = {
+    "the": "teh",
+    "you": "u",
+    "are": "r",
+    "your": "ur",
+    "really": "rlly",
+    "because": "bc",
+    "what": "wut",
+    "with": "w/",
+    "like": "liek",
+    "have": "hav",
+    "just": "jus"
+}
+
 def aikoify(text: str) -> str:
-    # Lowercase unless yelling
-    if not any(w.isupper() for w in text.split()):
-        text = text.lower()
-
-    # Stretch vowels (omg → omggg, hellooo → helloooo)
-    text = re.sub(r'([aeiou])\1*', lambda m: m.group(1) * random.randint(2, 4), text, flags=re.IGNORECASE)
-
-    # Drop words randomly (simulate trailing off / forgetting)
     words = text.split()
-    if len(words) > 6:
-        drop_count = random.randint(0, 2)
-        for _ in range(drop_count):
-            idx = random.randint(1, len(words) - 2)
-            words.pop(idx)
-    text = " ".join(words)
+    new_words = []
 
-    # Misspell common words
-    replacements = {
-        "really": "rly",
-        "you": "u",
-        "your": "ur",
-        "are": "r",
-        "okay": "ok",
-        "what": "wut",
-        "because": "bc",
-        "please": "pls",
-        "don’t": "dont",
-        "going": "goin",
-        "that": "tht"
-    }
-    for correct, wrong in replacements.items():
-        text = re.sub(rf'\b{correct}\b', wrong, text)
+    for word in words:
+        # Chance to replace a common word with a fast-typed variant
+        lowered = word.lower()
+        if lowered in COMMON_MISTYPES and random.random() < 0.4:
+            new_words.append(COMMON_MISTYPES[lowered])
+            continue
 
-    # Occasionally drop punctuation
-    text = re.sub(r'[.!?]', lambda m: '' if random.random() < 0.5 else m.group(), text)
+        # Chance to drop the last letter
+        if len(word) > 4 and random.random() < 0.2:
+            word = word[:-1]
 
-    return text
+        # Randomly skip punctuation
+        word = re.sub(r"[.!?]+$", "", word) if random.random() < 0.4 else word
+
+        new_words.append(word)
+
+    # Randomly lowercase the entire thing
+    result = " ".join(new_words)
+    if random.random() < 0.6:
+        result = result.lower()
+
+    return result
+
 
 
 def get_history(chat_id):
@@ -184,14 +187,17 @@ async def query_ai(chat_id, message_content):
 
 
 @client.event
+@client.event
 async def on_message(message):
-    
-    if last_responded_message_id.get(message.channel.id) == message.id:
-        return
-
+    # 🔒 Skip bot’s own messages and empty content
     if message.author.id == client.user.id or not message.content:
         return
 
+    # 🧠 Skip if we’ve already responded to this message
+    if last_responded_message_id.get(message.channel.id) == message.id:
+        return
+
+    # 🔧 Fetch member object (for role check)
     if isinstance(message.author, discord.User):
         try:
             member = await message.guild.fetch_member(message.author.id)
@@ -202,6 +208,7 @@ async def on_message(message):
 
     msg_lower = message.content.strip().lower()
 
+    # 🔁 Commands
     if msg_lower == "!reset":
         chat_id = message.channel.id
         history = get_history(chat_id)
@@ -222,15 +229,17 @@ async def on_message(message):
         await message.reply("✅ All daily usage counts have been reset.")
         return
 
+    # 🔍 Check if message is worth replying to
     chat_id = message.channel.id
     history = get_history(chat_id)[-4:]
     should_reply = await is_worth_replying(history)
 
     if not should_reply:
         print(f"[Filter] Decided not to reply to: {history[-1]['content']}")
-        last_responded_message_id[message.channel.id] = message.id  #  set it here too
+        last_responded_message_id[chat_id] = message.id  # 🧠 Still mark it to avoid rechecking
         return
 
+    # 🔓 Check supporter role and usage limits
     has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
     uid = message.author.id
     today = datetime.now().strftime("%Y-%m-%d")
@@ -250,6 +259,7 @@ async def on_message(message):
         usage["count"] += 1
         print(f"[Usage] {message.author} used {usage['count']} messages today")
 
+    # 💬 Generate and send reply
     async with response_lock:
         global last_reply_time
         now = time.time()
@@ -259,18 +269,17 @@ async def on_message(message):
 
         await message.channel.typing()
         try:
-            chat_id = message.channel.id
             response = await query_ai(chat_id, message.content)
             response = aikoify(response)
             await message.reply(response)
 
-            #Store the last message ID responded to in this channel
-            last_responded_message_id[message.channel.id] = message.id
+            last_responded_message_id[chat_id] = message.id
 
             if len(get_history(chat_id)) % 10 == 0:
                 await summarize_chat_with_ai(chat_id)
-        
+
         except Exception as e:
             await message.channel.send(f"❌ Error: {e}")
+
 
 client.run(os.getenv("DISCORD_TOKEN"))
