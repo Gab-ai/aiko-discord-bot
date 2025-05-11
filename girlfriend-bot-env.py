@@ -284,29 +284,35 @@ async def on_message(message):
         user_daily_usage.clear()
         await message.reply("✅ All daily usage counts have been reset.")
         return
-    # Fallback to True if directly replying to Aiko
+   
+    chat_id = message.channel.id
+    history = get_history(chat_id)[-6:]
+    should_reply = False  # Default fallback
+
+    # 🧵 Check if this message directly replies to Aiko
     if message.reference:
         try:
             replied_msg = await message.channel.fetch_message(message.reference.message_id)
             if replied_msg.author.id == AIKO_USER_ID:
                 should_reply = True
-        except:
-            should_reply = False
-    else:
-        # Otherwise run AI-based filter
-        chat_id = message.channel.id
-        history = get_history(chat_id)[-6:]
-        should_reply = await is_worth_replying(
-            history=history,
-            current_user_id=message.author.id,
-            last_user_id=last_user_to_aiko.get(chat_id),
-            aiko_user_id=AIKO_USER_ID,
-            current_message=message.content
-        )
+        except Exception as e:
+            print(f"[Reply check error] {e}")
+            # fallback continues to AI scoring
+            pass
+
+    # 🧠 If not a direct reply to Aiko, use AI model to judge intent
     if not should_reply:
-        print(f"[Filter] Decided not to reply to: {history[-1]['content']}")
-        last_responded_message_id[chat_id] = message.id  # 🧠 Still mark it to avoid rechecking
-        return
+        try:
+            should_reply = await is_worth_replying(
+                history=history,
+                current_user_id=message.author.id,
+                last_user_id=last_user_to_aiko.get(chat_id),
+                aiko_user_id=AIKO_USER_ID,
+                current_message=message.content
+            )
+        except Exception as e:
+            print(f"[Filter fallback error] {e}")
+            should_reply = False
 
     # 🔓 Check supporter role and usage limits
     has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)

@@ -1,8 +1,3 @@
-from openai import AsyncOpenAI
-import os
-
-client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 async def is_worth_replying(
     history: list[dict],
     current_user_id: int,
@@ -10,24 +5,27 @@ async def is_worth_replying(
     aiko_user_id: int,
     current_message: str
 ) -> bool:
-    # Filter out Aiko’s messages
     recent = [msg for msg in history if msg.get("author_id") != aiko_user_id][-3:]
     transcript = "\n".join(f"{msg['role']}: {msg['content']}" for msg in recent)
 
     system_prompt = (
-        "You are an assistant helping a Discord bot named Aiko decide if someone is talking to her.\n\n"
-        "- Say 'yes' if the user is replying to Aiko’s previous message or continuing a conversation with her.\n"
-        "- Say 'yes' if Aiko was last addressed and the tone implies follow-up (sarcasm, flirty, annoyed, etc).\n"
-        "- Say 'no' if it’s general chatter or unrelated to her messages.\n"
-        "- Do NOT be overly cautious — Aiko thrives on messy attention.\n\n"
-        "ONLY reply with 'yes' or 'no'."
+        "You are a judgment system for Aiko, a Discord user with chaotic e-girl energy. "
+        "Your job is to decide whether the current message is meant for her.\n\n"
+        "Say 'yes' if:\n"
+        "- The message continues a conversation Aiko was part of\n"
+        "- The message reacts to Aiko’s tone or phrasing (flirt, sarcasm, teasing, etc)\n"
+        "- Aiko was the last to reply to this user and the user is replying again\n\n"
+        "Say 'no' if:\n"
+        "- The message is general or not tied to Aiko’s previous messages\n"
+        "- It’s a new topic not involving Aiko\n\n"
+        "Be slightly generous. Aiko enjoys attention. Reply ONLY with 'yes' or 'no'."
     )
 
     user_prompt = (
-        f"Previous messages:\n{transcript}\n\n"
-        f"Last user Aiko replied to: {last_user_id}\n"
-        f"Current message: {current_message}\n"
-        f"Current user ID: {current_user_id}\n\n"
+        f"{transcript}\n\n"
+        f"[Aiko last replied to user ID: {last_user_id}]\n"
+        f"[Current user ID: {current_user_id}]\n"
+        f"[Current message: {current_message}]\n\n"
         "Is this message directed at Aiko?"
     )
 
@@ -43,7 +41,6 @@ async def is_worth_replying(
         )
         decision = response.choices[0].message.content.strip().lower()
         return decision.startswith("y")
-
     except Exception as e:
         print(f"[AI filter error] {e}")
         return False
