@@ -3,8 +3,9 @@ import os
 
 client_ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-async def is_worth_replying(channel_history: list[dict]) -> bool:
-    recent = channel_history[-3:]  # last 3 exchanges (dicts with "role" + "content")
+async def is_worth_replying(channel_history: list[dict], aiko_user_id: int) -> bool:
+    # Filter out Aiko's own messages
+    recent = [msg for msg in channel_history if msg.get("author_id") != aiko_user_id][-3:]
     transcript = "\n".join(f"{msg['role']}: {msg['content']}" for msg in recent)
 
     try:
@@ -30,7 +31,7 @@ async def is_worth_replying(channel_history: list[dict]) -> bool:
             ],
             temperature=0.2
         )
-        
+
         if not response.choices:
             print("[AI filter warning] No choices returned.")
             return False
