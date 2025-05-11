@@ -30,7 +30,11 @@ async def is_worth_replying(channel_history: list[dict]) -> bool:
             ],
             temperature=0.2
         )
-
+        
+        if not response.choices:
+            print("[AI filter warning] No choices returned.")
+            return False
+        
         decision = response.choices[0].message.content.strip().lower()
         return decision.startswith("y")
 

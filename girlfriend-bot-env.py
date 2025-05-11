@@ -5,10 +5,9 @@ from should_reply import is_worth_replying
 import time
 from datetime import datetime
 from openai import AsyncOpenAI
-from dotenv import load_dotenv
 import os
+from storage import load_all, save_all
 
-load_dotenv()
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 user_daily_usage = {}
@@ -29,6 +28,23 @@ client = discord.Client(intents=intents)
 
 chat_histories = {}
 chat_memories = {}
+
+chat_histories, chat_memories = load_all()
+
+def get_history(chat_id):
+    chat_id = str(chat_id)
+    if chat_id not in chat_histories:
+        chat_histories[chat_id] = [AIKO_SYSTEM_PROMPT]
+    return chat_histories[chat_id]
+
+def get_full_context(chat_id):
+    chat_id = str(chat_id)
+    history = get_history(chat_id)
+    context = []
+    if chat_id in chat_memories:
+        context.append({"role": "system", "content": f"Memory: {chat_memories[chat_id]}"})
+    context += history[-12:]
+    return context
 
 AIKO_SYSTEM_PROMPT = {
     "role": "system",
@@ -102,6 +118,8 @@ async def summarize_chat_with_ai(chat_id):
         )
         summary = response.choices[0].message.content.strip()
         chat_memories[chat_id] = summary
+        chat_histories[str(chat_id)] = history
+        save_all(chat_histories, chat_memories)
         print(f"[Memory updated for {chat_id}]")
         return summary
     except Exception as e:
@@ -113,15 +131,27 @@ async def query_ai(chat_id, message_content):
     history.append({"role": "user", "content": message_content})
     context = get_full_context(chat_id)
 
-    response = await openai_client.chat.completions.create(
-        model="gpt-4-turbo",
-        messages=context,
-        temperature=0.85,
-        top_p=0.95
-    )
-    reply = response.choices[0].message.content.strip()
-    history.append({"role": "assistant", "content": reply})
-    return reply
+    try:
+        response = await openai_client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=context,
+            temperature=0.85,
+            top_p=0.95
+        )
+
+        if not response.choices:
+            return "uhh i just had like. a blank moment lol try again?"
+
+        reply = response.choices[0].message.content.strip()
+        history.append({"role": "assistant", "content": reply})
+        chat_histories[str(chat_id)] = history
+        save_all(chat_histories, chat_memories)
+        return reply
+
+    except Exception as e:
+        print(f"[query_ai error] {e}")
+        return "omg something broke i’m blaming mercury retrograde 💀"
+
 
 @client.event
 async def on_message(message):
@@ -163,6 +193,7 @@ async def on_message(message):
     should_reply = await is_worth_replying(history)
 
     if not should_reply:
+        print(f"[Filter] Decided not to reply to: {history[-1]['content']}")
         return
 
     has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
