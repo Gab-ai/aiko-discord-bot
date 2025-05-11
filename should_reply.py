@@ -1,49 +1,39 @@
-import os
 from openai import OpenAI
+import os
 
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def is_worth_replying(history):
-    """
-    history: List of dicts like [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey~"}]
-    Only the last 4 messages are needed.
-    """
-
-    # Keep only the last 4 exchanges
-    context = history[-4:]
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a filter that decides if a new Discord message is clearly addressing a user named Aiko in an ongoing conversation.\n\n"
-                "Only return 'yes' or 'no'.\n\n"
-                "Say 'yes' if the most recent message:\n"
-                "- mentions 'aiko'\n"
-                "- uses 'you', 'u', or 'your' referring to Aiko\n"
-                "- replies directly to something Aiko just said\n"
-                "- is playful or flirty in a back-and-forth way\n\n"
-                "Say 'no' if:\n"
-                "- it’s general banter not aimed at Aiko\n"
-                "- it talks to someone else\n"
-                "- there’s no clear continuation or reference to Aiko"
-            )
-        },
-        *context,
-        {
-            "role": "user",
-            "content": "Should Aiko respond to that last message? Yes or no?"
-        }
-    ]
+async def is_worth_replying(channel_history: list[dict]) -> bool:
+    recent = channel_history[-3:]  # last 3 exchanges (dicts with "role" + "content")
+    transcript = "\n".join(f"{msg['role']}: {msg['content']}" for msg in recent)
 
     try:
-        response = client_ai.chat.completions.create(
+        response = await client_ai.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=messages,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You're an assistant that determines if the last few messages in a Discord chat are directed at Aiko, a user with chaotic e-girl energy.\n\n"
+                        "Reply only with 'yes' or 'no'.\n\n"
+                        "Say 'yes' if:\n"
+                        "- Someone is replying to Aiko's last message\n"
+                        "- Aiko is implied (e.g. sarcastic response, continued thread)\n"
+                        "- The conversation feels like it’s part of an exchange with her\n\n"
+                        "Say 'no' if:\n"
+                        "- The messages are aimed at other users\n"
+                        "- Aiko is not part of the conversation anymore\n"
+                        "- It's general chatter not involving her"
+                    )
+                },
+                {"role": "user", "content": f"{transcript}\n\nIs this directed at Aiko?"}
+            ],
             temperature=0.2
         )
+
         decision = response.choices[0].message.content.strip().lower()
         return decision.startswith("y")
+
     except Exception as e:
         print(f"[AI filter error] {e}")
         return False
