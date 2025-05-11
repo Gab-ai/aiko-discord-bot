@@ -114,9 +114,9 @@ async def query_ai(chat_id, message_content):
     context = get_full_context(chat_id)
 
     response = await openai_client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4-turbo",
         messages=context,
-        temperature=1,
+        temperature=0.85,
         top_p=0.95
     )
     reply = response.choices[0].message.content.strip()
