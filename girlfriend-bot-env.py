@@ -12,7 +12,7 @@ import re
 
 
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+1370781206534422569 = client.user.id
 user_daily_usage = {}
 MESSAGE_LIMIT = 5
 AI_VERIFIED_ROLE = "Supporter"
@@ -45,10 +45,22 @@ def get_full_context(chat_id):
     chat_id = str(chat_id)
     history = get_history(chat_id)
     context = []
+
+    # Add memory if it exists
     if chat_id in chat_memories:
-        context.append({"role": "system", "content": f"Memory: {chat_memories[chat_id]}"})
-    context += history[-12:]
+        context.append({
+            "role": "system",
+            "content": f"Memory: {chat_memories[chat_id]}"
+        })
+
+    # Only include valid context messages (filter out bot-echoed ones)
+    for msg in history[-12:]:
+        if msg["role"] == "user" and msg.get("author_id") == client.user.id:
+            continue  # Skip Aiko's own messages
+        context.append({k: msg[k] for k in ("role", "content")})
+
     return context
+
 
 AIKO_SYSTEM_PROMPT = {
     "role": "system",
@@ -159,9 +171,12 @@ async def summarize_chat_with_ai(chat_id):
         print(f"[Memory error for {chat_id}]: {e}")
         return None
 
-async def query_ai(chat_id, message_content):
+async def query_ai(chat_id, message_content, author_id):
+    chat_id = str(chat_id)
     history = get_history(chat_id)
-    history.append({"role": "user", "content": message_content})
+
+    # Add user message with author ID
+    history.append({"role": "user", "content": message_content, "author_id": author_id})
     context = get_full_context(chat_id)
 
     try:
@@ -176,8 +191,15 @@ async def query_ai(chat_id, message_content):
             return "uhh i just had like. a blank moment lol try again?"
 
         reply = response.choices[0].message.content.strip()
-        history.append({"role": "assistant", "content": reply})
-        chat_histories[str(chat_id)] = history
+
+        # Add assistant message with explicit author ID (bot’s own ID)
+        history.append({
+            "role": "assistant",
+            "content": reply,
+            "author_id": client.user.id  # You should assign this at on_ready
+        })
+
+        chat_histories[chat_id] = history
         save_all(chat_histories, chat_memories)
         return reply
 
@@ -186,7 +208,7 @@ async def query_ai(chat_id, message_content):
         return "omg something broke i’m blaming mercury retrograde 💀"
 
 
-@client.event
+
 @client.event
 async def on_message(message):
     # 🔒 Skip bot’s own messages and empty content
@@ -269,7 +291,7 @@ async def on_message(message):
 
         await message.channel.typing()
         try:
-            response = await query_ai(chat_id, message.content)
+            response = await query_ai(chat_id, message.content, message.author.id)
             response = aikoify(response)
             await message.reply(response)
 
