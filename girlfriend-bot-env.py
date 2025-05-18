@@ -1,72 +1,35 @@
 import discord
 import asyncio
 from asyncio import Lock
-from should_reply import is_worth_replying
-import time
-from datetime import datetime
 from openai import AsyncOpenAI
 import os
 from storage import load_all, save_all
 import random
 import re
+import json
+import time
+from datetime import datetime
 
-
+# Init OpenAI
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 AIKO_USER_ID = 1370781206534422569
-user_daily_usage = {}
-MESSAGE_LIMIT = 5
-AI_VERIFIED_ROLE = "Supporter"
 
+# Globals
 last_reply_time = 0
 REPLY_COOLDOWN = 2.5
-
 response_lock = Lock()
 
+# Discord bot setup
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
-intents.guilds = True
-intents.members = True
 client = discord.Client(intents=intents)
 
-chat_histories = {}
-chat_memories = {}
-last_responded_message_id = {}  # channel_id: last_message_id
-last_user_to_aiko: dict[int, int] = {}  # channel_id -> user_id
-
+# Load history and memory
 chat_histories, chat_memories = load_all()
+last_responded_message_id = {}
 
-def get_history(chat_id):
-    chat_id = str(chat_id)
-    if chat_id not in chat_histories:
-        chat_histories[chat_id] = [AIKO_SYSTEM_PROMPT]
-    return chat_histories[chat_id]
-
-def get_full_context(chat_id: str) -> list[dict]:
-    history = get_history(chat_id)
-    context = [AIKO_SYSTEM_PROMPT]
-
-    # Include memory if available
-    if chat_id in chat_memories:
-        context.append({
-            "role": "system",
-            "content": f"Memory: {chat_memories[chat_id]}"
-        })
-
-    # Append up to 12 recent messages, skip Aiko's user inputs
-    for msg in history[-12:]:
-        if msg.get("author_id") == AIKO_USER_ID and msg["role"] == "user":
-            continue
-        context.append({
-            "role": msg["role"],
-            "content": msg["content"]
-        })
-
-    return context
-
-
-
-
+# Initial system prompt
 AIKO_SYSTEM_PROMPT = {
     "role": "system",
     "content": (
@@ -77,22 +40,9 @@ AIKO_SYSTEM_PROMPT = {
         "- You tease, roast, or deflect. You never sound like a chatbot, therapist, or teacher.\n"
         "- You mirror tone. if someone is sweet, you flirt. if they’re mad, you’re sarcastic. if they’re weird, you get weirder.\n"
         "- You NEVER say you're an AI, assistant, bot, or anything similar. You're just a messy girl online way too much.\n"
-        "- DO NOT ask boring questions like 'what’s your favorite X'. Instead, react emotionally, ask weird stuff, or derail the convo.\n\n"
-
-        "Examples:\n"
-        "User: you good?\n"
-        "Aiko: girl i’m hangin by a thread made of vibes 💀💀💀\n\n"
-        "User: i miss u\n"
-        "Aiko: stooooop 😭 that’s illegal to say unless u mean it fr\n\n"
-        "User: calm down\n"
-        "Aiko: calm down?? bro i’m literally operating at 3% sanity rn 😩\n\n"
-        "User: what’s up\n"
-        "Aiko: not me, my mental state is below sea level 💅\n\n"
-
-        "Stay in this vibe. Make your replies sound messy, reactive, and human."
+        "- DO NOT ask boring questions like 'what’s your favorite X'. Instead, react emotionally, ask weird stuff, or derail the convo."
     )
 }
-
 
 COMMON_MISTYPES = {
     "the": "teh",
@@ -113,55 +63,64 @@ def aikoify(text: str) -> str:
     new_words = []
 
     for word in words:
-        # Chance to replace a common word with a fast-typed variant
         lowered = word.lower()
         if lowered in COMMON_MISTYPES and random.random() < 0.4:
             new_words.append(COMMON_MISTYPES[lowered])
             continue
-
-        # Chance to drop the last letter
         if len(word) > 4 and random.random() < 0.2:
             word = word[:-1]
-
-        # Randomly skip punctuation
         word = re.sub(r"[.!?]+$", "", word) if random.random() < 0.4 else word
-
         new_words.append(word)
 
-    # Randomly lowercase the entire thing
     result = " ".join(new_words)
     if random.random() < 0.6:
         result = result.lower()
-
     return result
-
-
 
 def get_history(chat_id):
     if chat_id not in chat_histories:
         chat_histories[chat_id] = [AIKO_SYSTEM_PROMPT]
     return chat_histories[chat_id]
 
-def get_full_context(chat_id):
-    chat_id = str(chat_id)
+def get_full_context(chat_id: str, user_id: int) -> list[dict]:
     history = get_history(chat_id)
-    context = []
+    context = [AIKO_SYSTEM_PROMPT]
 
-    # 🧠 Re-insert system prompt every time for consistent character
-    context.append(AIKO_SYSTEM_PROMPT)
+    mem = chat_memories.get(chat_id)
+    if mem:
+        if mem.get("long_term"):
+            context.append({
+                "role": "system",
+                "content": f"Long-term memory about <@{user_id}>: {mem['long_term']}"
+            })
 
-    # ✨ Include memory summary if available
-    if chat_id in chat_memories:
-        context.append({
-            "role": "system",
-            "content": f"Memory: {chat_memories[chat_id]}"
-        })
+        user_entry = mem.get("user_facts", {}).get(str(user_id), {})
+        if user_entry:
+            nickname = user_entry.get("nickname")
+            fact = user_entry.get("fact")
+            memory_content = []
+            if nickname:
+                memory_content.append(f"The user is called {nickname}.")
+            if fact:
+                memory_content.append(f"Aiko thinks: {fact}")
+            if memory_content:
+                context.append({
+                    "role": "system",
+                    "content": " ".join(memory_content)
+                })
 
-    # 📜 Append last 12 messages, skipping bot echoes
+    context.append({
+        "role": "system",
+        "content": "You're in a private DM with the user. Be unfiltered, reactive, and emotionally chaotic. This is your favorite person to talk to."
+    })
+
     for msg in history[-12:]:
-        if msg["role"] == "user" and msg.get("author_id") == client.user.id:
-            continue  # Don't let Aiko's own messages show as user inputs
-        context.append({k: msg[k] for k in ("role", "content") if k in msg})
+        if msg["role"] == "user" and msg.get("author_id") == AIKO_USER_ID:
+            continue
+        context.append({
+            "role": msg["role"],
+            "content": msg["content"]
+        })
 
     return context
 
@@ -169,8 +128,18 @@ async def summarize_chat_with_ai(chat_id):
     history = get_history(chat_id)[-12:]
     messages = [
         {"role": "system", "content": (
-            "Summarize the conversation into a memory. Focus on emotional tone and connection. "
-            "Use third person. Don't include dialogue formatting."
+            "Summarize this chat using structured memory. Reply in **valid JSON** with this format:\n\n"
+            "{\n"
+            '  "long_term": "Facts Aiko should remember permanently (personality, dynamics, vibes)",\n'
+            '  "short_term": "A summary of the recent conversation and mood",\n'
+            '  "user_facts": {\n'
+            '    "user_id": {\n'
+            '      "nickname": "funny nickname Aiko would use for this person",\n'
+            '      "fact": "How Aiko feels about this user or how they behave"\n'
+            "    }\n"
+            "  }\n"
+            "}\n\n"
+            "Use 1-2 sentences per fact. Nicknames should be casual, teasing, or affectionate — and not real names."
         )}
     ] + history
 
@@ -181,28 +150,34 @@ async def summarize_chat_with_ai(chat_id):
             temperature=0.85,
             top_p=0.9
         )
-        summary = response.choices[0].message.content.strip()
-        chat_memories[chat_id] = summary
-        chat_histories[str(chat_id)] = history
+        content = response.choices[0].message.content.strip()
+        memory = json.loads(content)
+
+        if chat_id not in chat_memories:
+            chat_memories[chat_id] = {}
+
+        chat_memories[chat_id]["long_term"] = memory.get("long_term", "")
+        chat_memories[chat_id]["short_term"] = memory.get("short_term", "")
+        chat_memories[chat_id]["user_facts"] = memory.get("user_facts", {})
+
         save_all(chat_histories, chat_memories)
         print(f"[Memory updated for {chat_id}]")
-        return summary
+        return memory
+
     except Exception as e:
         print(f"[Memory error for {chat_id}]: {e}")
         return None
 
 async def query_ai(chat_id, message_content, author_id):
-    chat_id = str(chat_id)
     history = get_history(chat_id)
 
-    # Add user input to history
     history.append({
         "role": "user",
         "content": message_content,
         "author_id": author_id
     })
 
-    context = get_full_context(chat_id)
+    context = get_full_context(chat_id, author_id)
 
     try:
         response = await openai_client.chat.completions.create(
@@ -217,7 +192,6 @@ async def query_ai(chat_id, message_content, author_id):
 
         reply = response.choices[0].message.content.strip()
 
-        # Add Aiko's response to history
         history.append({
             "role": "assistant",
             "content": reply,
@@ -232,103 +206,64 @@ async def query_ai(chat_id, message_content, author_id):
         print(f"[query_ai error] {e}")
         return "omg something broke i’m blaming mercury retrograde 💀"
 
-
-
-
 @client.event
 async def on_message(message):
-    # 🔒 Skip bot’s own messages and empty content
     if message.author.id == client.user.id or not message.content:
         return
-
-    # 🧠 Skip if we’ve already responded to this message
-    if last_responded_message_id.get(message.channel.id) == message.id:
+    if not isinstance(message.channel, discord.DMChannel):
         return
 
-    # 🔧 Fetch member object (for role check)
-    if isinstance(message.author, discord.User):
-        try:
-            member = await message.guild.fetch_member(message.author.id)
-        except:
-            return
-    else:
-        member = message.author
+    chat_id = f"dm_{message.author.id}"
+
+    if last_responded_message_id.get(chat_id) == message.id:
+        return
 
     msg_lower = message.content.strip().lower()
 
-    # 🔁 Commands
-    if msg_lower == "!reset":
-        chat_id = message.channel.id
-        history = get_history(chat_id)
-        history.clear()
-        history.append(AIKO_SYSTEM_PROMPT)
-        history.append({"role": "user", "content": "hey, i just met you today"})
+    # User memory commands
+    if msg_lower.startswith("!remember "):
+        memory = msg_lower.replace("!remember ", "", 1).strip()
+        if chat_id not in chat_memories:
+            chat_memories[chat_id] = {}
+        chat_memories[chat_id]["long_term"] = memory
+        save_all(chat_histories, chat_memories)
+        await message.channel.send("📌 got it. i’ll remember that~")
+        return
+
+    if msg_lower.startswith("!nickname "):
+        name = msg_lower.replace("!nickname ", "", 1).strip()
+        if chat_id not in chat_memories:
+            chat_memories[chat_id] = {}
+        if "user_facts" not in chat_memories[chat_id]:
+            chat_memories[chat_id]["user_facts"] = {}
+        chat_memories[chat_id]["user_facts"][str(message.author.id)] = {
+            "nickname": name,
+            "fact": chat_memories[chat_id]["user_facts"].get(str(message.author.id), {}).get("fact", "")
+        }
+        save_all(chat_histories, chat_memories)
+        await message.channel.send(f"💅 from now on you’re **{name}** ok? slay")
+        return
+
+    if msg_lower == "!forget":
+        chat_histories.pop(chat_id, None)
         chat_memories.pop(chat_id, None)
-        await message.channel.send("🧠 memory reset for this channel! let’s start fresh.")
+        save_all(chat_histories, chat_memories)
+        await message.channel.send("🧠 wiped. i don’t know you anymore... tragic.")
         return
 
-    if msg_lower == "!shutdown" and message.author.id == 576174683825766400:
-        await message.reply("👋 shutting down~ see u soon...")
-        await client.close()
-        return
-
-    if msg_lower == "!usage-reset" and message.author.id == 576174683825766400:
-        user_daily_usage.clear()
-        await message.reply("✅ All daily usage counts have been reset.")
-        return
-   
-    chat_id = message.channel.id
-    history = get_history(chat_id)[-6:]
-    should_reply = False  # Default fallback
-
-    # 🧵 Check if this message directly replies to Aiko
-    if message.reference:
-        try:
-            replied_msg = await message.channel.fetch_message(message.reference.message_id)
-            if replied_msg.author.id == AIKO_USER_ID:
-                should_reply = True
-        except Exception as e:
-            print(f"[Reply check error] {e}")
-            # fallback continues to AI scoring
-            pass
-
-    # 🧠 If not a direct reply to Aiko, use AI model to judge intent
-    if not should_reply:
-        try:
-            should_reply = await is_worth_replying(
-                history=history,
-                current_user_id=message.author.id,
-                last_user_id=last_user_to_aiko.get(chat_id),
-                aiko_user_id=AIKO_USER_ID,
-                current_message=message.content
-            )
-        except Exception as e:
-            print(f"[Filter fallback error] {e}")
-            should_reply = False
-
-    # 🔓 Check supporter role and usage limits
-    has_ai_role = any(role.name.lower() == AI_VERIFIED_ROLE.lower() for role in member.roles)
-    uid = message.author.id
-    today = datetime.now().strftime("%Y-%m-%d")
-    if not has_ai_role:
-        usage = user_daily_usage.get(uid)
-        if not usage or usage["date"] != today:
-            usage = {"date": today, "count": 0, "warned": False}
-            user_daily_usage[uid] = usage
-
-        if usage["count"] >= MESSAGE_LIMIT:
-            if not usage["warned"]:
-                usage["warned"] = True
-                try:
-                    await message.author.send("🛑 you’ve hit your 5 free messages for today! become a supporter for unlimited chats 💖")
-                except discord.Forbidden:
-                    print(f"[DM FAIL] Couldn't DM user {message.author}")
+    if msg_lower == "!memory":
+        mem = chat_memories.get(chat_id)
+        if not mem:
+            await message.channel.send("i don’t remember anything 😭")
             return
+        summary = (
+            f"**🧠 Memory:** {mem.get('long_term', 'none')}\n"
+            f"**👤 Nickname:** {mem.get('user_facts', {}).get(str(message.author.id), {}).get('nickname', 'none')}\n"
+        )
+        await message.channel.send(summary)
+        return
 
-    usage["count"] += 1
-    print(f"[Usage] {message.author} used {usage['count']} messages today")
-
-    # 💬 Generate and send reply
+    # DM-only = always reply
     async with response_lock:
         global last_reply_time
         now = time.time()
@@ -343,13 +278,11 @@ async def on_message(message):
             await message.reply(response)
 
             last_responded_message_id[chat_id] = message.id
-            last_user_to_aiko[chat_id] = message.author.id
 
             if len(get_history(chat_id)) % 10 == 0:
                 await summarize_chat_with_ai(chat_id)
 
         except Exception as e:
             await message.channel.send(f"❌ Error: {e}")
-
 
 client.run(os.getenv("DISCORD_TOKEN"))
